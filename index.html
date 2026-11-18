@@ -1,0 +1,91 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>چت چندمدلی</title>
+<style>
+  :root{--bg:#fff;--fg:#1a1a1a;--card:#f2f2f2;--me:#dbeafe;--bd:#d0d0d0}
+  @media (prefers-color-scheme:dark){:root{--bg:#161616;--fg:#eee;--card:#262626;--me:#1e3a5f;--bd:#444}}
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0}
+  body{background:var(--bg);color:var(--fg);font-family:system-ui,Tahoma,sans-serif;display:flex;flex-direction:column}
+  header{padding:8px;display:flex;gap:6px;flex-wrap:wrap;border-bottom:1px solid var(--bd)}
+  select,input,textarea,button{font:inherit;color:inherit;background:var(--card);border:1px solid var(--bd);border-radius:8px;padding:8px}
+  header select,header input{flex:1;min-width:110px}
+  #log{flex:1;overflow-y:auto;padding:10px;display:flex;flex-direction:column;gap:8px}
+  .m{padding:8px 12px;border-radius:12px;max-width:88%;white-space:pre-wrap;line-height:1.7;background:var(--card)}
+  .m.user{background:var(--me);align-self:flex-start}
+  .m.err{color:#c00}
+  footer{display:flex;gap:6px;padding:8px;border-top:1px solid var(--bd)}
+  textarea{flex:1;resize:none;height:48px}
+  button{cursor:pointer}
+</style>
+</head>
+<body>
+<header>
+  <select id="prov"></select>
+  <input id="model" placeholder="نام مدل (اختیاری)" dir="ltr">
+  <input id="pw" type="password" placeholder="رمز برنامه" dir="ltr">
+  <button id="clr">پاک‌کردن</button>
+</header>
+<div id="log"></div>
+<footer>
+  <textarea id="inp" placeholder="پیام بنویس..."></textarea>
+  <button id="send">ارسال</button>
+</footer>
+<script>
+const $ = (i) => document.getElementById(i);
+let history = [];
+$("pw").value = sessionStorage.getItem("pw") || "";
+
+function add(text, cls) {
+  const d = document.createElement("div");
+  d.className = "m " + cls; d.textContent = text;
+  $("log").appendChild(d); $("log").scrollTop = 1e9; return d;
+}
+async function headers() {
+  const h = { "Content-Type": "application/json" };
+  if ($("pw").value) { h["x-app-password"] = $("pw").value; sessionStorage.setItem("pw", $("pw").value); }
+  return h;
+}
+let defaults = {};
+async function loadProviders() {
+  const r = await fetch("/api/providers", { headers: await headers() });
+  if (!r.ok) { add("رمز اشتباه است", "err"); return; }
+  const list = await r.json();
+  $("prov").innerHTML = "";
+  list.forEach((p) => {
+    defaults[p.id] = p.model;
+    const o = document.createElement("option");
+    o.value = p.id; o.textContent = p.id + (p.available ? "" : " (بدون کلید)");
+    o.disabled = !p.available; $("prov").appendChild(o);
+  });
+  const first = list.find((p) => p.available);
+  if (first) $("prov").value = first.id;
+  $("model").placeholder = defaults[$("prov").value] || "";
+}
+$("prov").onchange = () => { $("model").placeholder = defaults[$("prov").value] || ""; };
+$("pw").onchange = loadProviders;
+
+async function send() {
+  const text = $("inp").value.trim(); if (!text) return;
+  $("inp").value = "";
+  history.push({ role: "user", content: text }); add(text, "user");
+  const wait = add("...", "bot");
+  try {
+    const r = await fetch("/api/chat", {
+      method: "POST", headers: await headers(),
+      body: JSON.stringify({ provider: $("prov").value, model: $("model").value.trim(), messages: history }),
+    });
+    const d = await r.json();
+    if (!r.ok) throw new Error(d.error);
+    wait.textContent = d.text; history.push({ role: "assistant", content: d.text });
+  } catch (e) { wait.textContent = "خطا: " + e.message; wait.classList.add("err"); history.pop(); }
+}
+$("send").onclick = send;
+$("clr").onclick = () => { history = []; $("log").innerHTML = ""; };
+loadProviders();
+</script>
+</body>
+</html>
